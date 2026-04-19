@@ -1,8 +1,26 @@
+// src/fetchers/slack.ts
+// ─────────────────────────────────────────────────────────────────────────────
+// Fetches messages from a Slack channel using the Slack Web API.
+//
+// What it does:
+//   fetchChannelHistory()    → reads every message in a channel (handles pagination)
+//   resolveChannelIdByName() → converts "#incident-foo" to a Slack channel ID
+//
+// Slack's conversations.history API returns up to 200 messages per call.
+// If a channel has more than 200 messages, we follow the pagination cursor
+// until we have everything.
+//
+// Requires: SLACK_BOT_TOKEN in .env
+// Required OAuth scopes: channels:history, channels:read
+// ─────────────────────────────────────────────────────────────────────────────
+
 import type { SlackMessage } from "../types";
 
 const SLACK_API = "https://slack.com/api";
 
-async function slackApi<T>(
+// ── Generic Slack API caller ──────────────────────────────────────────────────
+
+async function slackPost<T>(
   token: string,
   method: string,
   body: Record<string, unknown>
@@ -15,15 +33,25 @@ async function slackApi<T>(
     },
     body: JSON.stringify(body),
   });
+
   const data = (await res.json()) as T & { ok?: boolean; error?: string };
+
+  // Slack always returns HTTP 200, but signals errors in the response body
   if (!(data as { ok?: boolean }).ok) {
-    throw new Error(
-      `Slack API error: ${(data as { error?: string }).error ?? res.statusText}`
-    );
+    throw new Error(`Slack API error (${method}): ${(data as { error?: string }).error ?? res.statusText}`);
   }
   return data;
 }
 
+// ── Fetch channel history ─────────────────────────────────────────────────────
+
+/**
+ * Fetches all messages from a Slack channel, handling pagination automatically.
+ * Returns messages sorted oldest → newest (Slack returns newest-first by default).
+ *
+ * @param token     Bot token (SLACK_BOT_TOKEN)
+ * @param channelId Slack channel ID, e.g. "C07AB12XYZ"
+ */
 export async function fetchChannelHistory(
   token: string,
   channelId: string
@@ -31,34 +59,44 @@ export async function fetchChannelHistory(
   const messages: SlackMessage[] = [];
   let cursor: string | undefined;
 
+  // Keep fetching pages until there are no more
   do {
-    const data = await slackApi<{
+    const data = await slackPost<{
       messages?: SlackMessage[];
       response_metadata?: { next_cursor?: string };
     }>(token, "conversations.history", {
       channel: channelId,
-      limit: 200,
+      limit: 200, // maximum allowed per request
       cursor,
     });
-    const batch = data.messages ?? [];
-    messages.push(...batch);
-    cursor = data.response_metadata?.next_cursor || undefined;
-    if (!cursor) break;
-  } while (true);
 
+    messages.push(...(data.messages ?? []));
+    cursor = data.response_metadata?.next_cursor || undefined;
+  } while (cursor);
+
+  // Sort oldest → newest so the timeline reads chronologically
   return messages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
 }
 
-/** Resolve #name or plain name to channel id (public channels the bot can see). */
+// ── Resolve channel name to ID ────────────────────────────────────────────────
+
+/**
+ * Converts a channel name (e.g. "#incident-polygon-0703") to a Slack channel ID.
+ * Searches through all public and private channels the bot can see.
+ * Returns null if the channel is not found.
+ *
+ * @param token Slack bot token
+ * @param name  Channel name with or without the # prefix
+ */
 export async function resolveChannelIdByName(
   token: string,
   name: string
 ): Promise<string | null> {
-  const normalized = name.replace(/^#/, "").toLowerCase();
+  const target = name.replace(/^#/, "").toLowerCase();
   let cursor: string | undefined;
 
   do {
-    const data = await slackApi<{
+    const data = await slackPost<{
       channels?: { id: string; name: string }[];
       response_metadata?: { next_cursor?: string };
     }>(token, "conversations.list", {
@@ -66,12 +104,13 @@ export async function resolveChannelIdByName(
       limit: 200,
       cursor,
     });
-    for (const ch of data.channels ?? []) {
-      if (ch.name.toLowerCase() === normalized) return ch.id;
-    }
-    cursor = data.response_metadata?.next_cursor || undefined;
-    if (!cursor) break;
-  } while (true);
 
-  return null;
+    for (const ch of data.channels ?? []) {
+      if (ch.name.toLowerCase() === target) return ch.id;
+    }
+
+    cursor = data.response_metadata?.next_cursor || undefined;
+  } while (cursor);
+
+  return null; // channel not found
 }

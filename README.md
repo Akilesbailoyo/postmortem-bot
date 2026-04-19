@@ -2,175 +2,186 @@
 
 A Slack bot that auto-drafts incident post-mortems in under 5 minutes.
 
-It gathers incident context from Slack, GitHub, and OpsGenie, then generates a structured draft with either:
-- Anthropic (`ANTHROPIC_API_KEY` set), or
-- a built-in fallback draft generator (no Anthropic key required).
+It reads the incident Slack thread, finds linked GitHub PRs, queries OpsGenie for alerts, and calls Claude to produce a structured 7-section draft. The engineer reviews and publishes. The bot never publishes automatically.
 
-## How it works (plain language)
+---
 
-1. Engineer runs `/postmortem #incident-channel`.
-2. Bot collects:
-   - Slack messages in the incident channel,
-   - GitHub PRs linked in those messages,
-   - OpsGenie alerts during the incident time window.
-3. Bot drafts a post-mortem with exactly 7 sections:
-   - Summary
-   - Timeline
-   - Root Cause
-   - Contributing Factors
-   - Impact
-   - Action Items
-   - What Went Well
-4. Draft is posted for engineer review. The bot never auto-publishes final conclusions.
+## Live demo (no account, no install)
 
-## Runtime modes (single shared workflow)
+Open this link in your browser → press **Run** → see a rendered post-mortem in the preview panel:
 
-Both CLI demo and production Slack command use the same pipeline in `src/workflow.ts`.
+**[codesandbox.io/p/sandbox/github/Akilesbailoyo/postmortem-bot/tree/main](https://codesandbox.io/p/sandbox/github/Akilesbailoyo/postmortem-bot/tree/main)**
 
-- `MODE=mock`
-  - Fully offline
-  - Uses `src/mock/data.ts`
-  - Ignores Slack/GitHub/OpsGenie credentials
-  - Uses fallback draft if `ANTHROPIC_API_KEY` is missing
-- `MODE=real`
-  - Uses live APIs
-  - Requires Slack credentials
-  - Uses real channel input and enriches with GitHub/OpsGenie when configured
+No API keys needed. Runs in mock mode using the hardcoded incident in `src/mock/data.ts`.
+
+---
+
+## How it works
+
+```
+ENGINEER types: /postmortem #incident-polygon-0703
+      │
+      ▼
+BOT extracts the channel name from the command
+      │
+      ▼
+BOT fetches three things IN PARALLEL:
+      │
+      ├── [1] SLACK — reads every message in the incident channel
+      │         Why: the thread is the raw incident narrative
+      │         How: Slack conversations.history API (paginated — gets everything)
+      │
+      ├── [2] GITHUB — scans messages for github.com/pull/ links,
+      │         then fetches: PR title, who merged it, when, files changed
+      │         Why: most incidents correlate with a recent deployment
+      │         How: GitHub REST API /repos/{owner}/{repo}/pulls/{number}
+      │
+      └── [3] OPSGENIE — queries for alerts in the incident time window
+                (derived from the first and last Slack message timestamps)
+                Why: the alert is the system's own record of what broke and when
+                How: OpsGenie /v2/alerts API with a time-range query
+      │
+      ▼
+BOT checks for gaps:
+  → Slack thread empty?  → asks engineer to confirm the channel name
+  → GitHub missing?      → proceeds and notes the gap in the draft
+  → OpsGenie missing?    → proceeds and notes the gap in the draft
+      │
+      ▼
+BOT calls Claude with all collected data and a structured prompt:
+  - use only the provided data, do not invent facts
+  - do not name individuals as causes — focus on systems and processes
+  - output exactly 7 sections
+      │
+      ▼
+CLAUDE returns a structured draft (or fallback generator if no API key)
+      │
+      ▼
+BOT posts the draft to the incident channel for engineer review.
+The bot never publishes automatically. Human judgment is always the final step.
+```
+
+---
 
 ## Project structure
 
-```text
+```
 postmortem-bot/
-├── .env.example
-├── .gitignore
+├── .env.example                 ← copy to .env and fill in your keys
 ├── package.json
 ├── tsconfig.json
-├── README.md
-├── postmortem-bot.md
 └── src/
-    ├── workflow.ts         # shared runtime flow (mock + real)
-    ├── context.ts          # builds context from mock or live sources
-    ├── generate.ts         # Anthropic generation + fallback draft
-    ├── demo.ts             # CLI demo runner
-    ├── index.ts            # Slack slash-command server
-    ├── types.ts            # shared data types
+    ├── types.ts                 ← shared data shapes (the "forms" the bot fills in)
+    ├── workflow.ts              ← single shared pipeline (demo + Slack bot both use this)
+    ├── context.ts               ← builds context from mock data or live APIs
+    ├── generate.ts              ← Claude API call + fallback draft generator
+    ├── server.ts                ← web server for CodeSandbox (npm start)
+    ├── demo.ts                  ← terminal CLI demo
+    ├── index.ts                 ← production Slack bot (⚠ in progress — needs Slack app)
     ├── fetchers/
-    │   ├── slack.ts
-    │   ├── github.ts
-    │   └── opsgenie.ts
+    │   ├── slack.ts             ← reads the Slack incident thread (real API)
+    │   ├── github.ts            ← fetches linked GitHub PRs (real API)
+    │   └── opsgenie.ts          ← queries OpsGenie alerts in the incident window (real API)
     ├── mock/
-    │   └── data.ts
+    │   └── data.ts              ← hardcoded realistic incident (used when MODE=mock)
     └── __tests__/
-        └── workflow.test.ts
+        └── workflow.test.ts     ← tests covering the core pipeline
 ```
 
-## Setup
+---
 
-### Prerequisites
+## Setup (from scratch on a new Mac)
 
-- Node.js 18+
-- npm 9+
-
-Check:
+Open Terminal (`Cmd+Space` → type `Terminal` → Enter):
 
 ```bash
-node --version
-npm --version
+# 1. Install Homebrew
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# After it finishes, run the two PATH commands it prints. They look like:
+#   (echo; echo 'eval "$(/opt/homebrew/bin/brew shellenv)"') >> ~/.zprofile
+#   eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# 2. Install Node.js (includes npm)
+brew install node
+
+# 3. Verify
+node --version    # v18 or higher
+npm --version     # 9 or higher
+
+# 4. Install TypeScript runner
+npm install -g ts-node typescript
 ```
 
-### Install
+Then:
 
 ```bash
+git clone https://github.com/Akilesbailoyo/postmortem-bot.git
+cd postmortem-bot
 npm install
 cp .env.example .env
 ```
 
-## Running the demo
+---
 
-### Option A: Offline mock demo (recommended first run)
+## Running
 
-```bash
-npm run demo:mock
-```
-
-What you get:
-- a complete post-mortem draft (7 sections),
-- source-gap notes if data is missing,
-- and the raw context payload shown after the draft.
-
-### Option B: Real API demo (no Slack app server needed)
+### Web demo (default — what CodeSandbox runs)
 
 ```bash
-npm run demo:real
+npm start
 ```
 
-You will be prompted for a Slack channel ID or `#channel-name`.
+Starts a local web server on port 3000. Open [http://localhost:3000](http://localhost:3000) to see the rendered post-mortem. Uses mock data — no keys needed.
 
-## Running production Slack bot
+### Terminal demo
 
 ```bash
-MODE=real npm start
+npm run demo:mock    # offline, no credentials
+npm run demo:real    # live Slack/GitHub/OpsGenie APIs (keys required in .env)
 ```
 
-Then expose your local server and configure Slack:
-
-```bash
-ngrok http 3000
-```
-
-Set Slack slash command Request URL to:
-
-`https://<your-ngrok-or-host-url>/slack/events`
-
-Required Slack scopes:
-- `channels:history`
-- `chat:write`
-- `commands`
-- `channels:read` (recommended for name-to-id resolution)
-
-## Environment variables
-
-### For `MODE=mock`
-- none required
-- optional: `ANTHROPIC_API_KEY` for live LLM output
-
-### For `MODE=real`
-- required:
-  - `SLACK_BOT_TOKEN`
-  - `SLACK_SIGNING_SECRET` (Slack server mode)
-- optional but recommended:
-  - `GITHUB_TOKEN`
-  - `OPSGENIE_API_KEY`
-  - `ANTHROPIC_API_KEY` (otherwise fallback draft is used)
-
-## Tests
+### Tests
 
 ```bash
 npm test
 ```
 
-Current tests cover:
-- runtime mode selection,
-- mock mode behavior without credentials,
-- real mode guardrails for required input/credentials.
+### Production Slack bot
 
-## Run online with no registration (mock only)
+⚠ Requires a registered Slack app and HTTPS webhook. See `src/index.ts` for full setup instructions.
 
+```bash
+MODE=real npm run start:prod
+```
 
-1. Open the site.: https://codesandbox.io/p/sandbox/github/Akilesbailoyo/postmortem-bot/tree/main
-2. Run.
+---
 
-This is best for quick mock demonstrations. Full production mode needs a host with HTTPS webhook support and environment variables.
+## Environment variables
+
+Copy `.env.example` to `.env` and fill in the values you need.
+
+| Variable | Required for | Where to get it |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Better draft quality | [console.anthropic.com](https://console.anthropic.com) → API Keys |
+| `SLACK_BOT_TOKEN` | Real mode | [api.slack.com/apps](https://api.slack.com/apps) → your app → OAuth tokens |
+| `SLACK_SIGNING_SECRET` | Production Slack bot | Same app → Basic Information |
+| `GITHUB_TOKEN` | GitHub PR enrichment | GitHub → Settings → Developer settings → Personal access tokens |
+| `OPSGENIE_API_KEY` | OpsGenie alert enrichment | OpsGenie → Settings → API Key Management |
+
+Without any keys: runs in mock mode with the fallback draft generator. Useful for demos and development.
+
+---
 
 ## Common errors
 
 | Error | Cause | Fix |
 |---|---|---|
-| `SLACK_BOT_TOKEN is not set` | Missing key in `.env` | Add `SLACK_BOT_TOKEN` |
-| `Missing SLACK_SIGNING_SECRET or SLACK_BOT_TOKEN` | Production server started without required Slack creds | Set both vars for `MODE=real npm start` |
-| `Slack API error: channel_not_found` | Wrong channel or bot cannot access it | Confirm channel and invite bot |
-| `Slack API error: not_in_channel` | Bot is not in incident channel | Run `/invite @postmortem-bot` in channel |
-| `GITHUB_TOKEN is not set` | Missing key | Add token or proceed without GitHub enrichment |
-| `OPSGENIE_API_KEY is not set` | Missing key | Add key or proceed without alert enrichment |
-| Anthropic auth error | Invalid/expired API key | Check Anthropic API key |
-| Draft quality is generic in fallback mode | No Anthropic key set | Add `ANTHROPIC_API_KEY` for model-generated draft |
+| `SLACK_BOT_TOKEN is not set` | Missing key in `.env` | Add the token or use `npm run demo:mock` |
+| `Slack API error: channel_not_found` | Bot not in the channel | Run `/invite @postmortem-bot` in the incident channel |
+| `Slack API error: not_in_channel` | Same as above | Same fix |
+| `GITHUB_TOKEN is not set` | Missing key | Add token or proceed — GitHub enrichment is optional |
+| `OPSGENIE_API_KEY is not set` | Missing key | Add key or proceed — OpsGenie is optional |
+| Anthropic auth error | Wrong or expired key | Check [console.anthropic.com](https://console.anthropic.com) |
+| Draft cuts off mid-sentence | Token limit reached | Increase `max_tokens` in `src/generate.ts` from 2000 to 3000 |
+| Draft quality is generic | No `ANTHROPIC_API_KEY` set | Add the key for Claude-powered output |

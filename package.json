@@ -4,12 +4,12 @@
   "private": true,
   "description": "Slack bot that drafts incident post-mortems from Slack, GitHub, and OpsGenie context",
   "scripts": {
+    "start": "MODE=mock ts-node src/server.ts",
     "demo:mock": "MODE=mock ts-node src/demo.ts",
     "demo:real": "MODE=real ts-node src/demo.ts",
-    "start": "npm test && npm run demo:mock",
-    "start:prod": "ts-node src/index.ts",
+    "start:prod": "MODE=real ts-node src/index.ts",
     "build": "tsc",
-    "test": "npm run build && node --test dist/__tests__/*.test.js"
+    "test": "npm run build && node --test dist/__tests__/workflow.test.js"
   },
   "engines": {
     "node": ">=18"

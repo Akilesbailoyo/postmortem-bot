@@ -1,8 +1,24 @@
+// src/mock/data.ts
+// ─────────────────────────────────────────────────────────────────────────────
+// Hardcoded incident data used when MODE=mock.
+//
+// This represents a realistic incident:
+//   - A payment router started throwing 5xx errors after a deploy
+//   - Engineers identified the culprit PR in the Slack thread
+//   - They rolled back and the service recovered
+//
+// The data shapes here are identical to what the real Slack, GitHub, and
+// OpsGenie API fetchers return — so switching from mock to real mode
+// requires no changes anywhere else in the codebase.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import type { GitHubPrContext, OpsgenieAlert, SlackMessage } from "../types";
 
-/** Mock channel id (not a real Slack id). */
 export const MOCK_CHANNEL_ID = "C0MOCKINCIDENT";
 
+// ── Slack thread ─────────────────────────────────────────────────────────────
+// Five messages covering the incident lifecycle:
+// detection → investigation → rollback → recovery → resolution
 export const mockSlackMessages: SlackMessage[] = [
   {
     ts: "1710000000.000100",
@@ -36,6 +52,9 @@ export const mockSlackMessages: SlackMessage[] = [
   },
 ];
 
+// ── GitHub pull request ───────────────────────────────────────────────────────
+// The PR that was deployed just before the incident started.
+// The bot finds this by scanning the Slack thread for github.com/pull/ links.
 export const mockGithubPrs: GitHubPrContext[] = [
   {
     url: "https://github.com/acme/platform/pull/1842",
@@ -44,16 +63,19 @@ export const mockGithubPrs: GitHubPrContext[] = [
     number: 1842,
     title: "Tune payment-router batch flush interval",
     mergedBy: "release-bot",
-    mergedAt: "2024-03-09T11:58:00Z",
+    mergedAt: "2024-03-09T11:58:00Z", // 5 minutes before the incident started
     body: "Reduces latency under load.\n\nFixes #387",
     filesChanged: [
       "services/payment-router/src/batch.ts",
       "services/payment-router/src/config.ts",
     ],
-    linkedIssueNumbers: [387],
+    linkedIssueNumbers: [387], // parsed from "Fixes #387" in the PR body
   },
 ];
 
+// ── OpsGenie alert ────────────────────────────────────────────────────────────
+// The alert that fired when the payment-router started throwing errors.
+// The bot finds this by querying OpsGenie for alerts in the incident time window.
 export const mockOpsgenieAlerts: OpsgenieAlert[] = [
   {
     id: "mock-alert-1",
