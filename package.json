@@ -1,0 +1,26 @@
+{
+  "name": "postmortem-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Slack bot that drafts incident post-mortems from Slack, GitHub, and OpsGenie context",
+  "scripts": {
+    "demo:mock": "MODE=mock ts-node src/demo.ts",
+    "demo:real": "MODE=real ts-node src/demo.ts",
+    "start": "ts-node src/index.ts",
+    "build": "tsc",
+    "test": "npm run build && node --test dist/__tests__/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@slack/bolt": "^3.22.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
