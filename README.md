@@ -156,12 +156,9 @@ Current tests cover:
 
 ## Run online with no registration (mock only)
 
-Use [onecompiler.com/nodejs](https://onecompiler.com/nodejs):
 
-1. Open the site.
-2. Replace default code.
-3. Paste code adapted for one-file run (demo + needed helpers).
-4. Run.
+1. Open the site.: https://codesandbox.io/p/sandbox/github/Akilesbailoyo/postmortem-bot/tree/main
+2. Run.
 
 This is best for quick mock demonstrations. Full production mode needs a host with HTTPS webhook support and environment variables.
 

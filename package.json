@@ -6,7 +6,8 @@
   "scripts": {
     "demo:mock": "MODE=mock ts-node src/demo.ts",
     "demo:real": "MODE=real ts-node src/demo.ts",
-    "start": "ts-node src/index.ts",
+    "start": "npm test && npm run demo:mock",
+    "start:prod": "ts-node src/index.ts",
     "build": "tsc",
     "test": "npm run build && node --test dist/__tests__/*.test.js"
   },
